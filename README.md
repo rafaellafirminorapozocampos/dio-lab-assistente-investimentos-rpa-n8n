@@ -61,6 +61,10 @@ flowchart LR
   class O out;
 
 ```
+## 📸 Demonstração do Fluxo no n8n
+Abaixo está o pipeline completo implementado e executado com sucesso, desde o Webhook até a geração de mensagens com o Google Gemini:
+<img width="1839" height="583" alt="image" src="https://github.com/user-attachments/assets/42d4b642-7579-4b39-8c9b-7ef18f207059" />
+
 
 ## Tecnologias e Ferramentas
 
