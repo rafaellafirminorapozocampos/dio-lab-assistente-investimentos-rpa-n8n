@@ -1,0 +1,270 @@
+{
+  "name": "DIO desafio RPA",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "fd3c097f-8fd4-41f1-83fb-180e6925546b",
+      "name": "Webhook",
+      "webhookId": "be4847a0-3785-4463-a229-36854275fef7"
+    },
+    {
+      "parameters": {
+        "url": "https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "ed9a6632-0610-4e47-83d8-4d7d6dfd1e83",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Recupera os clientes do nó Webhook\nconst webhookData = $('Webhook').first().json;\nconst clientes = (webhookData.body && webhookData.body.clientes) \n  ? webhookData.body.clientes \n  : (webhookData.clientes || []);\n\n// 2. Recupera o texto do CSV vindo do HTTP Request\nconst httpData = $input.first().json;\nconst csvTexto = typeof httpData === 'string' \n  ? httpData \n  : (httpData.data || Object.values(httpData)[0] || '');\n\n// 3. Converte o CSV em uma lista de objetos\nconst linhas = csvTexto.trim().split('\\n').slice(1); // remove o cabeçalho\nconst investimentos = linhas.map(linha => {\n  const [perfil, produto, minimo, rentabilidade] = linha.split(',');\n  return { \n    perfil: perfil?.trim(), \n    produto: produto?.trim(), \n    minimo: minimo?.trim(), \n    rentabilidade: rentabilidade?.trim() \n  };\n});\n\n// 4. Cruza cada cliente com o seu perfil e monta a mensagem\nconst resultados = clientes.map(cliente => {\n  // Filtra apenas os investimentos compatíveis com o perfil do cliente\n  const recomendados = investimentos.filter(inv => \n    inv.perfil && cliente.perfil && inv.perfil.toLowerCase() === cliente.perfil.toLowerCase()\n  );\n\n  // Formata os produtos em tópicos\n  const listaProdutos = recomendados.map(inv => \n    `• ${inv.produto} (Mínimo: R$ ${inv.minimo} | Rentabilidade: ${inv.rentabilidade})`\n  ).join('\\n');\n\n  // Monta a mensagem final personalizada\n  const mensagem = `Olá, ${cliente.nome}!\\n\\n` +\n    `Analisamos sua conta com saldo de ${cliente.saldo} e perfil ${cliente.perfil}.\\n` +\n    `Recomendamos as seguintes opções de investimento para você:\\n\\n` +\n    `${listaProdutos}\\n\\n` +\n    `Conte com a nossa assessoria para investir com segurança!`;\n\n  return {\n    json: {\n      nome: cliente.nome,\n      email: cliente.email,\n      perfil: cliente.perfil,\n      saldo: cliente.saldo,\n      investimentos: recomendados,\n      mensagemFinal: mensagem\n    }\n  };\n});\n\nreturn resultados;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "2503189b-6a8c-45ae-a03e-858f871b4779",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        672,
+        -192
+      ],
+      "id": "d85d08bf-4fea-4cf7-a5b4-dfe452daa5e0",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Função auxiliar para sortear uma mensagem da lista\nfunction pick(lista) {\n  if (!lista || lista.length === 0) return '';\n  const indice = Math.floor(Math.random() * lista.length);\n  return lista[indice];\n}\n\n// 2. Função auxiliar para converter \"R$ 12.500,00\" em número (12500)\nfunction parseSaldo(saldoTexto) {\n  if (typeof saldoTexto === 'number') return saldoTexto;\n  if (!saldoTexto) return 0;\n  const limpo = saldoTexto.toString()\n    .replace(/R\\$\\s?/g, '')\n    .replace(/\\./g, '')\n    .replace(',', '.')\n    .trim();\n  return parseFloat(limpo) || 0;\n}\n\n// 3. Obtém todos os itens que chegaram ao nó\nconst itens = $input.all();\n\n// 4. Mapeia e enriquece cada cliente\nconst resultados = itens.map(item => {\n  const c = item.json;\n  const nome = c.nome || 'Cliente';\n  const email = c.email || '';\n  const perfil = c.perfil || 'Conservador';\n  const saldoTexto = c.saldo || 'R$ 0,00';\n  const saldoNum = parseSaldo(saldoTexto);\n  const investimentos = c.investimentos || [];\n\n  // Filtra opções que o saldo do cliente consegue cobrir (saldo >= minimo)\n  const acessiveis = investimentos.filter(inv => {\n    const minVal = parseFloat(inv.minimo) || 0;\n    return saldoNum >= minVal;\n  });\n\n  // Escolhe o investimento acessível mais rentável (ou o primeiro da lista)\n  const escolhido = acessiveis.length > 0 ? acessiveis[0] : (investimentos[0] || {\n    produto: 'Reserva de Emergência',\n    minimo: '0',\n    rentabilidade: '100% CDI'\n  });\n\n  // Cria a justificativa da recomendação baseada no perfil\n  let motivo = '';\n  const perfilLower = perfil.toLowerCase();\n  if (perfilLower === 'conservador') {\n    motivo = `Produto de baixo risco com rentabilidade de ${escolhido.rentabilidade}, ideal para preservar seu patrimônio.`;\n  } else if (perfilLower === 'moderado') {\n    motivo = `Equilíbrio ideal entre rentabilidade (${escolhido.rentabilidade}) e segurança, aproveitando seu saldo de ${saldoTexto}.`;\n  } else {\n    motivo = `Potencial de alta valorização no longo prazo (${escolhido.rentabilidade}), alinhado à sua estratégia de crescimento de capital.`;\n  }\n\n  // Gera 3 variações de mensagens para humanizar o contato\n  const mensagens = [\n    `Olá, ${nome}! Com base no seu perfil ${perfil} e saldo disponível de ${saldoTexto}, nossa recomendação principal é o ${escolhido.produto}. ${motivo}`,\n    `Prezado(a) ${nome}, identificamos uma oportunidade exclusiva para o perfil ${perfil}: investir em ${escolhido.produto} (${escolhido.rentabilidade}). ${motivo}`,\n    `Oi, ${nome}! Que tal fazer seu saldo de ${saldoTexto} render mais? Para o seu perfil ${perfil}, a melhor indicação de hoje é ${escolhido.produto}. ${motivo}`\n  ];\n\n  return {\n    nome,\n    email,\n    perfil,\n    saldo_texto: saldoTexto,\n    saldo_num: saldoNum,\n    recomendacao: escolhido,\n    motivo,\n    mensagens,\n    mensagem_escolhida: pick(mensagens)\n  };\n});\n\n// 5. Retorna no formato padrão que o n8n espera\nreturn resultados.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        -32
+      ],
+      "id": "662a1066-ccd8-4795-8543-dc8e1f4a6aa7",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst resultados = $json.resultados || [];\n\nfunction parseBRL(valor) {\n  if (valor == null || valor === \"\") return 0;\n\n  const s = String(valor)\n    .replace(/R\\$\\s?/g, \"\")\n    .replace(/\\./g, \"\")\n    .replace(\",\", \".\")\n    .trim();\n\n  const n = Number(s);\n  return Number.isFinite(n) ? n : 0;\n}\n\n// Retorna UM ITEM por cliente\nconst out = resultados.map(c => {\n  const saldoNum =\n    c.saldo_num ?? parseBRL(c.saldo_texto ?? c.saldo);\n\n  return {\n    json: {\n      email_to: String(c.email || \"\").trim(),\n      nome: String(c.nome || \"\").trim(),\n      perfil: c.perfil,\n      saldo_texto: c.saldo_texto ?? c.saldo,\n      saldo_num: saldoNum,\n      recomendacao: c.recomendacao,\n      motivo: c.motivo,\n      mensagem_base:\n        c.mensagem_escolhida || c.mensagens?.[0] || \"\",\n      copy_rules: {\n        idioma: \"pt-BR\",\n        tom: \"amigável e profissional\",\n        tamanho: \"curto (4-6 linhas)\",\n        evitar: [\n          \"promessas de ganho\",\n          \"garantias\",\n          \"linguagem agressiva\"\n        ]\n      }\n    }\n  };\n});\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -32
+      ],
+      "id": "5cab0a49-150d-4c84-935f-74b04bb17365",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-3-flash-preview"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Você é um consultor financeiro pessoal experiente e empático. Sua missão é escrever uma mensagem personalizada de recomendação de investimentos para um cliente.\n\nDados do Cliente:\n- Nome: {{ $json.nome }}\n- Perfil de Risco: {{ $json.perfil }}\n- Saldo Disponível para Investir: {{ $json.saldo_texto }}\n- Produto Recomendado: {{ $json.recomendacao.produto }}\n- Rentabilidade Estimada: {{ $json.recomendacao.rentabilidade }}\n\nDiretrizes para a Mensagem:\n1. Comece com uma saudação calorosa chamando o cliente pelo primeiro nome.\n2. Explique de forma simples e sem jargões por que o produto {{ $json.recomendacao.produto }} é ideal para o perfil {{ $json.perfil }} dele e como o saldo de {{ $json.saldo_texto }} pode ser bem aproveitado.\n3. Mantenha um tom encorajador, transparente e profissional (evite promessas exageradas de enriquecimento).\n4. A mensagem deve ser concisa (2 a 3 parágrafos curtos), formatada para envio por e-mail ou WhatsApp.\n5. Finalize convidando o cliente a tirar dúvidas caso queira dar o próximo passo.\n\nEscreva apenas o texto final da mensagem, sem explicações adicionais antes ou depois."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1184,
+        -240
+      ],
+      "id": "29a27a5e-3011-4441-b252-e7ef3e779cec",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "nLoXJekMKVBkKDoH",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recupera todos os itens recebidos\nconst items = $input.all();\n\nreturn items.map(item => {\n  // 'j' representa o objeto com os dados do cliente e da recomendação\n  const j = item.json;\n\n  // Pega o texto gerado pela IA (Gemini costuma gravar em 'text' ou 'content')\n  // Se a IA não tiver rodado, usa a 'mensagem_escolhida' como fallback\n  const textoIA = j.text || j.content || j.mensagem_escolhida || j.mensagemFinal || '';\n\n  const nome = j.nome || 'Cliente';\n  const email = j.email || '';\n  const perfil = j.perfil || 'Não informado';\n  const saldo = j.saldo_texto || j.saldo || 'R$ 0,00';\n  const produto = j.recomendacao?.produto || 'Produto Recomendado';\n  const rentabilidade = j.recomendacao?.rentabilidade || 'A consultar';\n  const minimo = j.recomendacao?.minimo ? `R$ ${j.recomendacao.minimo}` : 'Sem mínimo';\n  const motivo = j.motivo || 'Alinhado à sua estratégia de investimento.';\n\n  // 1. Destinatário\n  const to = email;\n\n  // 2. Assunto do E-mail\n  const subject = `🎯 ${nome}, sua recomendação exclusiva de investimentos (${perfil})`;\n\n  // 3. Versão em Texto Puro\n  const text_body = `${textoIA}\\n\\n---\\nResumo da Oportunidade:\\n• Produto: ${produto}\\n• Rentabilidade: ${rentabilidade}\\n• Mínimo: ${minimo}\\n• Perfil: ${perfil}\\n• Saldo Considerado: ${saldo}\\n\\nMotivo: ${motivo}`;\n\n  // 4. Versão em HTML estilizado para envio de E-mail\n  const html_body = `\n    <div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; line-height: 1.6; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;\">\n      <div style=\"background: linear-gradient(135deg, #1e3a8a, #3b82f6); color: white; padding: 24px; text-align: center;\">\n        <h1 style=\"margin: 0; font-size: 20px;\">Assistente de Investimentos</h1>\n        <p style=\"margin: 6px 0 0; font-size: 13px; opacity: 0.9;\">Recomendação inteligente e personalizada</p>\n      </div>\n\n      <div style=\"padding: 24px;\">\n        <p style=\"white-space: pre-line; font-size: 15px; color: #1e293b;\">${textoIA}</p>\n\n        <div style=\"background-color: #f8fafc; border-left: 4px solid #3b82f6; padding: 16px; margin: 20px 0; border-radius: 4px;\">\n          <h3 style=\"margin-top: 0; color: #1e3a8a; font-size: 15px;\">📊 Resumo da Oportunidade</h3>\n          <ul style=\"padding-left: 20px; margin: 0; font-size: 14px;\">\n            <li><strong>Produto Indicado:</strong> ${produto}</li>\n            <li><strong>Rentabilidade Estimada:</strong> ${rentabilidade}</li>\n            <li><strong>Aplicação Mínima:</strong> ${minimo}</li>\n            <li><strong>Perfil de Risco:</strong> ${perfil}</li>\n            <li><strong>Saldo Disponível:</strong> ${saldo}</li>\n          </ul>\n        </div>\n\n        <p style=\"font-size: 13px; color: #64748b; font-style: italic; margin-bottom: 0;\">\n          <strong>Justificativa da Assessoria:</strong> ${motivo}\n        </p>\n      </div>\n\n      <div style=\"background-color: #f1f5f9; padding: 14px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0;\">\n        Mensagem gerada automaticamente pelo Assistente de Investimentos RPA com IA.\n      </div>\n    </div>\n  `;\n\n  // 5. Retorno no padrão da aula para debug e disparo\n  return {\n    json: {\n      ok: true,\n      to,\n      subject,\n      text_body,\n      html_body,\n\n      // (opcional) manter alguns campos úteis pra debug/aula\n      meta: {\n        nome: j.nome,\n        perfil: j.perfil,\n        produto: j.recomendacao?.produto,\n        minimo: j.recomendacao?.minimo,\n        rentabilidade: j.recomendacao?.rentabilidade,\n        motivo: j.motivo\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        0
+      ],
+      "id": "88501cda-449d-44a8-93f7-1b462712a45e",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Code in JavaScript1').item.json.email }}",
+        "subject": "={{ $('Code in JavaScript1').item.json.motivo }}",
+        "message": "={{ $('Code in JavaScript1').item.json.mensagens[2] }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1712,
+        0
+      ],
+      "id": "f2bc71b1-8f21-40d1-92d7-a63cbdff61c1",
+      "name": "Send a message",
+      "webhookId": "08cc917e-2b56-4ab7-b879-16a24a6acd9f"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        []
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "4c5adcb8-214a-407c-bd41-46a8fd617827",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "664be05601a80f737c3dcb578124c235b598dee62872a8acca30bc2e2b4165b7"
+  },
+  "nodeGroups": [],
+  "id": "rsilqBBCEGE9uusF",
+  "tags": []
+}
